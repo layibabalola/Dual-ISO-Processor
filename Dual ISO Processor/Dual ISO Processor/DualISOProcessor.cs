@@ -1287,6 +1287,11 @@ namespace Dual_ISO_Processor
                                     }
                                 }
                             }
+                            else
+                            {
+                                //Memory protection check failed? Put file back into queue
+                                fileQueue.Enqueue(fi);
+                            }
                         }
 
                         if (isCR2Processing)
