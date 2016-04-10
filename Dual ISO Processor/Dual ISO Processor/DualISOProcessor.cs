@@ -14,6 +14,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Management;
+using Microsoft.VisualBasic.Devices;
 
 namespace Dual_ISO_Processor
 {
@@ -23,10 +24,10 @@ namespace Dual_ISO_Processor
         int allowedThreads = Environment.ProcessorCount;
         int threadCount = 0;
         int errorCount = 0;
-        long maxDirQueue = 0;
-        long maxFileQueue = 0;
-        long maxSubfolderFileQueue = 0;
-        long fileQueueBeforeEmpty = 0;
+        long maxDirQueueCount = 0;
+        long maxFileQueueCount = 0;
+        long maxSubfolderFileQueueCount = 0;
+        long fileQueueBeforeEmptyCount = 0;
         long imagesProcessed = 0;
         double percentComplete = 0;
         bool formClosed = false;
@@ -115,7 +116,8 @@ namespace Dual_ISO_Processor
 
             bwThreads.RunWorkerAsync();
         }
-        void FindAndMoveMsgBox(string title, int x, int y)
+
+        void FindAndMoveMsgBox(string title, Form form)
         {
             //Moves a messagebox to the desired position
             Thread thr = new Thread(() => // create a new thread
@@ -124,11 +126,11 @@ namespace Dual_ISO_Processor
                 // while there's no MessageBox, FindWindow returns IntPtr.Zero
                 while ((msgBox = FindWindow(IntPtr.Zero, title)) == IntPtr.Zero) ;
                 // after the while loop, msgBox is the handle of your MessageBox
-                Rectangle r = new Rectangle();
 
                 ManagedWinapi.Windows.SystemWindow msgBoxWindow = new ManagedWinapi.Windows.SystemWindow(msgBox);
-                msgBoxWindow.Location = new Point(x, y);
+                msgBoxWindow.Location = new Point(form.Location.X + (form.Size.Width - msgBoxWindow.Size.Width)/2, form.Location.Y + (form.Size.Height - msgBoxWindow.Size.Height)/2);
             });
+            thr.IsBackground = true;
             thr.Start(); // starts the thread
         }
 
@@ -283,11 +285,13 @@ namespace Dual_ISO_Processor
             percentComplete = 1;
             swCanceling.Start();
 
+            //Stay in this loop until all threads are done and this worker is cancelled
             while (!((BackgroundWorker)(sender)).CancellationPending || threadCount > 0)
             {
                 percentComplete = threadCount / allowedThreads;
             }
 
+            //Cancel the stopwatch worker
             if (bwCumulativeStopWatch.IsBusy)
             {
                 bwCumulativeStopWatch.CancelAsync();
@@ -296,9 +300,9 @@ namespace Dual_ISO_Processor
             //Set all globals to original state
             dirQueue = new ConcurrentQueue<DirectoryInfo>();
             fileQueue = new ConcurrentQueue<FileInfo>();
-            maxDirQueue = 0;
-            maxFileQueue = 0;
-            maxSubfolderFileQueue = 0;
+            maxDirQueueCount = 0;
+            maxFileQueueCount = 0;
+            maxSubfolderFileQueueCount = 0;
             currentDirectory = initialDirectory;
         }
 
@@ -375,9 +379,9 @@ namespace Dual_ISO_Processor
                     }
                     else
                     {
-                        if (maxDirQueue > 0)
+                        if (maxDirQueueCount > 0)
                         {
-                            pBar.Value = (int)(100 - 100 * (double)(((double)dirQueue.Count() / (double)maxDirQueue)));
+                            pBar.Value = (int)(100 - 100 * (double)(((double)dirQueue.Count() / (double)maxDirQueueCount)));
                             if (pBar.Value != progressBar1.Value)
                             {
                                 btnP.Text = process += ".";
@@ -535,9 +539,9 @@ namespace Dual_ISO_Processor
 
                             Button btnSetImage = new Button();
                             btnSetImage.Name = btnSetImageFolder.Name;
-                            if (maxSubfolderFileQueue > 0)
+                            if (maxSubfolderFileQueueCount > 0)
                             {
-                                btnSetImage.Text = (1 - ((double)subFolderFileQueue.Count() / (double)maxSubfolderFileQueue)).ToString("##0.###%");
+                                btnSetImage.Text = (1 - ((double)subFolderFileQueue.Count() / (double)maxSubfolderFileQueueCount)).ToString("##0.###%");
                             }
                             else
                             {
@@ -592,7 +596,7 @@ namespace Dual_ISO_Processor
 
                             Label lblImgProc = new Label();
                             lblImgProc.Name = lblImagesProcessedVal.Name;
-                            lblImgProc.Text = imagesProcessed.ToString() + "/" + maxFileQueue;
+                            lblImgProc.Text = imagesProcessed.ToString() + "/" + maxFileQueueCount;
                             lblImgProc.Enabled = lblImagesProcessedVal.Enabled;
 
                             controlList.Add(lblImgProc);
@@ -648,9 +652,9 @@ namespace Dual_ISO_Processor
 
                             Button btnSetImage = new Button();
                             btnSetImage.Name = btnSetImageFolder.Name;
-                            if (maxSubfolderFileQueue > 0)
+                            if (maxSubfolderFileQueueCount > 0)
                             {
-                                btnSetImage.Text = (1 - ((double)subFolderFileQueue.Count() / (double)maxSubfolderFileQueue)).ToString("##0.###%");
+                                btnSetImage.Text = (1 - ((double)subFolderFileQueue.Count() / (double)maxSubfolderFileQueueCount)).ToString("##0.###%");
                             }
                             else
                             {
@@ -785,17 +789,23 @@ namespace Dual_ISO_Processor
                                 //Now that the work is completed, the user can try again and if successful, cleanup can happen.
                                 errorCount = 0;
 
-                                FindAndMoveMsgBox("Work Status", this.Location.X + this.Height / 2, this.Location.Y + this.Width / 8);
-                                MessageBox.Show(this, msg, "Work Status");
+                                BeginInvoke((MethodInvoker)delegate
+                                {
+                                    FindAndMoveMsgBox("Work Status", this);
+                                    MessageBox.Show(this, msg, "Work Status");
+                                });
                             }
                         }
                     }
                     catch (Exception ex)
                     {
-                        if (Directory.Exists(txtCr2hdrPath.Text))
+                        BeginInvoke((MethodInvoker)delegate
                         {
-                            File.WriteAllText(txtCr2hdrPath.Text + "\\ExceptionLog." + Guid.NewGuid().ToString() + ".log", ex.Message + "\r\n" + ex.StackTrace);
-                        }
+                            if (Directory.Exists(txtCr2hdrPath.Text))
+                            {
+                                File.WriteAllText(txtCr2hdrPath.Text + "\\ExceptionLog." + Guid.NewGuid().ToString() + ".log", ex.Message + "\r\n" + ex.StackTrace);
+                            }
+                        });
                     }
                 }
                 Thread.Sleep(250);
@@ -805,6 +815,8 @@ namespace Dual_ISO_Processor
 
         private void BwCumulativeStopWatch_DoWork(object sender, DoWorkEventArgs e)
         {
+            //This worker tracks the total duration of the job, the estimated remaining time for the job, 
+            //and the duration remaining for the current folder
             do
             {
                 elapsedTime = cwStopwatch.Elapsed.Milliseconds > 0 ? cwStopwatch.Elapsed.ToString(@"hh\:mm\:ss\.FFF", null) :
@@ -820,19 +832,19 @@ namespace Dual_ISO_Processor
 
                 if (fileQueueCount > 0)
                 {
-                    fileQueueBeforeEmpty = fileQueueCount;
+                    fileQueueBeforeEmptyCount = fileQueueCount;
                 }
 
                 TimeSpan durationTimeSpan = TimeSpan.FromMilliseconds(milliDurationPerImage);
                 durationPerImage = durationTimeSpan.Milliseconds > 0 ? durationTimeSpan.ToString(@"hh\:mm\:ss\.FFF", null) :
                     durationTimeSpan.ToString(@"hh\:mm\:ss", null);
 
-                TimeSpan timeRemainingTimeSpan = TimeSpan.FromMilliseconds(milliDurationPerImage * (maxFileQueue - imagesProcessed));
+                TimeSpan timeRemainingTimeSpan = TimeSpan.FromMilliseconds(milliDurationPerImage * (maxFileQueueCount - imagesProcessed));
                 timeRemaining = string.Format("{0:D2} Days, {1:D2} Hours, {2:D2} Minutes, {3:D2} Seconds, {4:D2} Milliseconds", timeRemainingTimeSpan.Days,
                     timeRemainingTimeSpan.Hours, timeRemainingTimeSpan.Minutes, timeRemainingTimeSpan.Seconds, timeRemainingTimeSpan.Milliseconds);
 
-                TimeSpan folderTimeRemainingTimeSpan = TimeSpan.FromMilliseconds(milliDurationPerImage * (maxSubfolderFileQueue -
-                    (maxSubfolderFileQueue - subFolderFileQueue.Count())));
+                TimeSpan folderTimeRemainingTimeSpan = TimeSpan.FromMilliseconds(milliDurationPerImage * (maxSubfolderFileQueueCount -
+                    (maxSubfolderFileQueueCount - subFolderFileQueue.Count())));
                 folderTimeRemaining = string.Format("{0:D2} Days, {1:D2} Hours, {2:D2} Minutes, {3:D2} Seconds, {4:D2} Milliseconds",
                     folderTimeRemainingTimeSpan.Days, folderTimeRemainingTimeSpan.Hours, folderTimeRemainingTimeSpan.Minutes,
                     folderTimeRemainingTimeSpan.Seconds, folderTimeRemainingTimeSpan.Milliseconds);
@@ -857,6 +869,7 @@ namespace Dual_ISO_Processor
             {
                 try
                 {
+                    //Build Directory Queue
                     diListStopwatch.Start();
                     IEnumerable<DirectoryInfo> diList = di.EnumerateDirectories("*", SearchOption.AllDirectories).Where(
                         d => d.EnumerateFiles("*.dng", SearchOption.TopDirectoryOnly).Union(d.EnumerateFiles("*.cr2",
@@ -864,16 +877,23 @@ namespace Dual_ISO_Processor
                         !d.Name.Contains("Dual ISO Original CR2") && !d.Name.Contains("logs"));
 
                     dirQueue = new ConcurrentQueue<DirectoryInfo>(diList);
-                    maxDirQueue = dirQueue.Count;
+
+                    //How many directories in play?
+                    maxDirQueueCount = dirQueue.Count;
 
                     diListStopwatch.Stop();
                     //How long did it take to get a directory listing and build dir queue?
                     string diListDuration = diListStopwatch.Elapsed.ToString();
 
+                    //Build File Queue
                     fileListStopwatch.Start();
                     List<FileInfo> fileList = new List<FileInfo>();
+
+                    //Search root level for files
                     fileList.AddRange(di.EnumerateFiles("*.dng", SearchOption.TopDirectoryOnly).Union(di.EnumerateFiles("*.cr2",
                         SearchOption.TopDirectoryOnly)).ToList());
+
+                    //Search subdirectories for files
                     foreach (DirectoryInfo dInfo in diList)
                     {
                         string path = dInfo.FullName;
@@ -884,9 +904,11 @@ namespace Dual_ISO_Processor
                     }
                     fileQueue = new ConcurrentQueue<FileInfo>(fileList);
 
-                    maxFileQueue = fileQueue.Count;
+                    //How many files in play?
+                    maxFileQueueCount = fileQueue.Count;
 
-                    if (maxFileQueue > 0)
+                    //Get file count for first folder being processed
+                    if (maxFileQueueCount > 0)
                     {
                         FileInfo subfolderFileInfo;
                         fileQueue.TryPeek(out subfolderFileInfo);
@@ -898,7 +920,7 @@ namespace Dual_ISO_Processor
                                     subfolderFileInfo.Directory.EnumerateFiles("*.cr2", SearchOption.TopDirectoryOnly)).ToList()
                                 );
 
-                            maxSubfolderFileQueue = subFolderFileQueue.Count();
+                            maxSubfolderFileQueueCount = subFolderFileQueue.Count();
                         }
                     }
 
@@ -918,8 +940,11 @@ namespace Dual_ISO_Processor
             }
             else
             {
-                FindAndMoveMsgBox("Path Error", this.Location.X + this.Height / 2, this.Location.Y + this.Width / 8);
-                MessageBox.Show(this, "Image Folder Path Invalid", "Path Error");
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    FindAndMoveMsgBox("Path Error", this);
+                    MessageBox.Show(this, "Image Folder Path Invalid", "Path Error");
+                });
             }
 
             e.Cancel = true;
@@ -932,304 +957,329 @@ namespace Dual_ISO_Processor
 
             do
             {
-                bool errorFlag = false;
+                //Get available memory
+                var computerInfo = new ComputerInfo();
+                var availablePhysicalMemory = (decimal)(computerInfo.AvailablePhysicalMemory);
+                var totalPhysicalMemory = (decimal)(computerInfo.TotalPhysicalMemory);
+                var freeMemRatio = availablePhysicalMemory / totalPhysicalMemory;
 
-                if (!directoryStopwatch.IsRunning)
+                //Memory protection check
+                if (freeMemRatio > (decimal).09)
                 {
-                    directoryStopwatch.Start();
-                }
+                    bool errorFlag = false;
 
-                FileInfo fiPeek;
-                fileQueue.TryPeek(out fiPeek);
-
-                try
-                {
-                    Stopwatch swFile = new Stopwatch();
-                    swFile.Start();
-                    FileInfo fi;
-                    while (!fileQueue.TryDequeue(out fi) && fileQueue.Count() != 0)
+                    if (!directoryStopwatch.IsRunning)
                     {
-
+                        directoryStopwatch.Start();
                     }
 
-                    if (fi != null && File.Exists(fi.FullName))
+                    //Get file info so that any necessary logging can be written to the
+                    //appropriate folder
+                    FileInfo fiPeek;
+                    fileQueue.TryPeek(out fiPeek);
+
+                    try
                     {
-                        bool cr2Flag = false;
-                        string filePath = fi.FullName;
-                        string directoryPath = fi.DirectoryName;
-                        currentDirectory = directoryPath;
+                        Stopwatch swFile = new Stopwatch();
+                        swFile.Start();
 
-                        //Create Subfolders for Processed DNGs and Logs
-                        if (fi.Name.ToLower().Contains(".dng"))
-                        {
-                            fi.Directory.CreateSubdirectory("Dual ISO DNG");
-                        }
-                        if (fi.Name.ToLower().Contains(".cr2"))
-                        {
-                            cr2Flag = true;
-                            fi.Directory.CreateSubdirectory("Dual ISO CR2");
-                            fi.Directory.CreateSubdirectory("Dual ISO Original CR2");
-                        }
-                        fi.Directory.CreateSubdirectory("logs");
+                        bool isCR2Processing = false;
 
-                        //Handle condition where application exited before files moved
-                        if (File.Exists(fi.FullName.ToLower().Replace(".dng", ".cr2")))
+                        //Keep trying to get a file from the queue
+                        FileInfo fi;
+                        while (!fileQueue.TryDequeue(out fi) && fileQueue.Count() != 0)
                         {
-                            cr2Flag = true;
+
                         }
 
-                        //Get initial image path pre-move
-                        string initialImagePath = fi.FullName;
-                        //Get initial log path pre-move
-                        string initialLogPath = initialImagePath + ".log";
-
-                        //Get log directory path
-                        string logDirectoryPath = fi.Directory.EnumerateDirectories().Where(
-                            d => d.Name.Contains("logs")).FirstOrDefault().FullName;
-
-                        //Get destination log path
-                        string destLogPath = fi.Directory.EnumerateDirectories().Where(
-                            d => d.Name.Contains("logs")).FirstOrDefault().FullName + "\\" + fi.Name + ".log";
-
-                        //Get destination image path
-                        string destImagePath = string.Empty;
-                        if (fi.Name.ToLower().Contains(".dng"))
+                        if (fi != null && File.Exists(fi.FullName))
                         {
-                            if (!cr2Flag)
+                            string filePath = fi.FullName;
+                            string directoryPath = fi.DirectoryName;
+                            currentDirectory = directoryPath;
+
+                            //Create Subfolders for Processed DNGs and Logs
+                            if (fi.Name.ToLower().Contains(".dng"))
                             {
-                                destImagePath = fi.Directory.EnumerateDirectories().Where(
-                                    d => d.Name.Contains("Dual ISO DNG")).FirstOrDefault().FullName + "\\" + fi.Name;
+                                fi.Directory.CreateSubdirectory("Dual ISO DNG");
                             }
-                            else
+                            if (fi.Name.ToLower().Contains(".cr2"))
                             {
-                                destImagePath = fi.Directory.EnumerateDirectories().Where(
-                                    d => d.Name.Contains("Dual ISO CR2")).FirstOrDefault().FullName + "\\" + fi.Name;
+                                isCR2Processing = true;
+                                fi.Directory.CreateSubdirectory("Dual ISO CR2");
+                                fi.Directory.CreateSubdirectory("Dual ISO Original CR2");
                             }
-                        }
-                        else if (fi.Name.ToLower().Contains(".cr2"))
-                        {
-                            destImagePath = fi.Directory.EnumerateDirectories().Where(
-                                d => d.Name.Contains("Dual ISO Original CR2")).FirstOrDefault().FullName + "\\" + fi.Name;
-                        }
+                            fi.Directory.CreateSubdirectory("logs");
 
-                        string initialDNGPath = string.Empty;
-                        string destDNGPath = string.Empty;
-
-                        if (cr2Flag)
-                        {
-                            initialDNGPath = initialImagePath.ToLower().Replace(".cr2", ".dng").ToUpper();
-                            destDNGPath = destImagePath.Replace("Dual ISO Original CR2", "Dual ISO CR2").ToLower().Replace(".cr2", ".dng").ToUpper();
-                        }
-
-                        string output = string.Empty;
-                        string errorOutput = string.Empty;
-
-                        if (!formClosed)
-                        {
-                            // Use ProcessStartInfo class.
-                            ProcessStartInfo startInfo = new ProcessStartInfo();
-                            startInfo.CreateNoWindow = true;
-                            startInfo.FileName = "\"" + txtCr2hdrPath.Text + "\"";
-                            startInfo.WorkingDirectory = txtCr2hdrPath.Text.Length > 0 ? txtCr2hdrPath.Text.Substring(0, txtCr2hdrPath.Text.IndexOf(".exe")).Substring(0, txtCr2hdrPath.Text.LastIndexOf("\\")) : startInfo.WorkingDirectory;
-                            startInfo.WindowStyle = ProcessWindowStyle.Hidden;
-                            startInfo.Arguments = "\"" + filePath + "\"";
-                            startInfo.RedirectStandardOutput = true;
-                            startInfo.RedirectStandardError = true;
-                            startInfo.UseShellExecute = false;
-                            Process exeProcess = Process.Start(startInfo);
-
-                            // Start the process with the info we specified.
-                            // Call WaitForExit and then the using-statement will close.
-                            using (exeProcess)
+                            //Handle condition where application exited before files moved
+                            if (File.Exists(fi.FullName.ToLower().Replace(".dng", ".cr2")))
                             {
-                                output = exeProcess.StandardOutput.ReadToEnd();
-                                errorOutput = exeProcess.StandardError.ReadToEnd();
-                                exeProcess.WaitForExit();
-                                output += "\r\nProcess Errored?: ";
-                                if (exeProcess.ExitCode == 0)
+                                isCR2Processing = true;
+                            }
+
+                            //Get initial image path pre-move
+                            string initialImagePath = fi.FullName;
+                            //Get initial log path pre-move
+                            string initialLogPath = initialImagePath + ".log";
+
+                            //Get log directory path
+                            string logDirectoryPath = fi.Directory.EnumerateDirectories().Where(
+                                d => d.Name.Contains("logs")).FirstOrDefault().FullName;
+
+                            //Get destination log path
+                            string destLogPath = fi.Directory.EnumerateDirectories().Where(
+                                d => d.Name.Contains("logs")).FirstOrDefault().FullName + "\\" + fi.Name + ".log";
+
+                            //Get destination image path
+                            string destImagePath = string.Empty;
+                            if (fi.Name.ToLower().Contains(".dng"))
+                            {
+                                if (!isCR2Processing)
                                 {
-                                    output += "No";
+                                    destImagePath = fi.Directory.EnumerateDirectories().Where(
+                                        d => d.Name.Contains("Dual ISO DNG")).FirstOrDefault().FullName + "\\" + fi.Name;
                                 }
                                 else
                                 {
-                                    output += "Yes";
-                                    errorCount++;
-                                    errorFlag = true;
+                                    destImagePath = fi.Directory.EnumerateDirectories().Where(
+                                        d => d.Name.Contains("Dual ISO CR2")).FirstOrDefault().FullName + "\\" + fi.Name;
                                 }
-                                output += "\r\n" + errorOutput;
-                                output += "\r\n\r\n" + exeProcess.TotalProcessorTime.ToString() + " process duration.";
-
-                                string processDuration = exeProcess.TotalProcessorTime.ToString();
+                            }
+                            else if (fi.Name.ToLower().Contains(".cr2"))
+                            {
+                                destImagePath = fi.Directory.EnumerateDirectories().Where(
+                                    d => d.Name.Contains("Dual ISO Original CR2")).FirstOrDefault().FullName + "\\" + fi.Name;
                             }
 
-                            //Move Image if Processing was Successful
-                            if (!errorFlag)
+                            string initialDNGPath = string.Empty;
+                            string destDNGPath = string.Empty;
+
+                            if (isCR2Processing)
                             {
-                                if (File.Exists(initialImagePath))
+                                initialDNGPath = initialImagePath.ToLower().Replace(".cr2", ".dng").ToUpper();
+                                destDNGPath = destImagePath.Replace("Dual ISO Original CR2", "Dual ISO CR2").ToLower().Replace(".cr2", ".dng").ToUpper();
+                            }
+
+                            string output = string.Empty;
+                            string errorOutput = string.Empty;
+
+                            //Get available memory
+                            availablePhysicalMemory = (decimal)(computerInfo.AvailablePhysicalMemory);
+                            totalPhysicalMemory = (decimal)(computerInfo.TotalPhysicalMemory);
+                            freeMemRatio = availablePhysicalMemory / totalPhysicalMemory;
+                            
+                            //Memory protection check
+                            if (!formClosed && freeMemRatio > (decimal).09)
+                            {
+                                // Use ProcessStartInfo class.
+                                ProcessStartInfo startInfo = new ProcessStartInfo();
+                                startInfo.CreateNoWindow = true;
+                                startInfo.FileName = "\"" + txtCr2hdrPath.Text + "\"";
+                                startInfo.WorkingDirectory = txtCr2hdrPath.Text.Length > 0 ?
+                                    txtCr2hdrPath.Text.Substring(0, txtCr2hdrPath.Text.IndexOf(".exe")).Substring(0, txtCr2hdrPath.Text.LastIndexOf("\\")) : startInfo.WorkingDirectory;
+                                startInfo.WindowStyle = ProcessWindowStyle.Hidden;
+                                startInfo.Arguments = "\"" + filePath + "\"";
+                                startInfo.RedirectStandardOutput = true;
+                                startInfo.RedirectStandardError = true;
+                                startInfo.UseShellExecute = false;
+                                Process exeProcess = Process.Start(startInfo);
+
+                                // Start the process with the info we specified.
+                                // Call WaitForExit and then the using-statement will close.
+                                using (exeProcess)
                                 {
-                                    if (!File.Exists(destImagePath))
+                                    output = exeProcess.StandardOutput.ReadToEnd();
+                                    errorOutput = exeProcess.StandardError.ReadToEnd();
+                                    exeProcess.WaitForExit();
+
+                                    output += "\r\nProcess Errored?: ";
+                                    //Check exitcode to see if process errored or not
+                                    if (exeProcess.ExitCode == 0)
                                     {
-                                        fi.MoveTo(destImagePath);
+                                        output += "No";
                                     }
                                     else
                                     {
-                                        if (destImagePath.ToLower().Contains(".dng"))
-                                        {
-                                            fi.MoveTo(destImagePath.ToLower().Replace(".dng", "." + Guid.NewGuid().ToString() + ".dng"));
-                                        }
-                                        else if (destImagePath.ToLower().Contains(".cr2"))
-                                        {
-                                            fi.MoveTo(destImagePath.ToLower().Replace(".cr2", "." + Guid.NewGuid().ToString() + ".cr2"));
-                                        }
+                                        output += "Yes";
+                                        errorCount++;
+                                        errorFlag = true;
                                     }
+                                    output += "\r\n" + errorOutput;
+                                    output += "\r\n\r\n" + exeProcess.TotalProcessorTime.ToString() + " process duration.";
 
-                                    imagesProcessed++;
-                                    FileInfo subfolderFileInfoDequeued;
-                                    subFolderFileQueue.TryDequeue(out subfolderFileInfoDequeued);
-                                }
-                            }
-
-                            swFile.Stop();
-                            output += "\r\n" + swFile.Elapsed.ToString() + " file activity duration.";
-
-                            if (errorFlag)
-                            {
-                                File.WriteAllText(filePath + ".ProcessErrored.log", output);
-                            }
-                            else
-                            {
-                                File.WriteAllText(filePath + ".log", output);
-                            }
-
-                            //Move Log and perform cleanup if Processing was Successful
-                            if (!errorFlag)
-                            {
-                                if (File.Exists(initialLogPath))
-                                {
-                                    if (!File.Exists(destLogPath))
-                                    {
-                                        File.Move(initialLogPath, destLogPath);
-                                    }
-                                    else
-                                    {
-                                        File.Move(initialLogPath, destLogPath.Replace(".log", "." + Guid.NewGuid().ToString() + ".log"));
-                                    }
+                                    string processDuration = exeProcess.TotalProcessorTime.ToString();
                                 }
 
-                                if (cr2Flag)
+                                //Move Image if Processing was Successful
+                                if (!errorFlag)
                                 {
-                                    //Move resultant DNG if CR2 was processed
-                                    if (File.Exists(initialDNGPath))
+                                    if (File.Exists(initialImagePath))
                                     {
-                                        if (!File.Exists(destDNGPath))
+                                        if (!File.Exists(destImagePath))
                                         {
-                                            File.Move(initialDNGPath, destDNGPath);
+                                            fi.MoveTo(destImagePath);
                                         }
                                         else
                                         {
-                                            File.Move(initialDNGPath, (destDNGPath.ToLower().Replace(".dng", "." + Guid.NewGuid().ToString() + ".dng")));
-                                        }
-                                    }
-                                    else
-                                    //Resultant DNG leftover while CR2 still in folder
-                                    {
-                                        DirectoryInfo dirInfo = new DirectoryInfo(currentDirectory);
-                                        dirInfo.CreateSubdirectory("Dual ISO Original CR2");
-
-                                        string leftoverInitialCR2Path = initialImagePath.ToLower().Replace(".dng", ".cr2").ToUpper();
-                                        string leftoverDestCR2Path = destImagePath.Replace(
-                                            "Dual ISO CR2", "Dual ISO Original CR2").ToLower().Replace(".dng", ".cr2").ToUpper();
-
-                                        if (File.Exists(leftoverInitialCR2Path))
-                                        {
-                                            if (!File.Exists(leftoverDestCR2Path))
+                                            if (destImagePath.ToLower().Contains(".dng"))
                                             {
-                                                File.Move(leftoverInitialCR2Path, leftoverDestCR2Path);
+                                                fi.MoveTo(destImagePath.ToLower().Replace(".dng", "." + Guid.NewGuid().ToString() + ".dng"));
                                             }
-                                            else
+                                            else if (destImagePath.ToLower().Contains(".cr2"))
                                             {
-                                                File.Move(leftoverInitialCR2Path, leftoverDestCR2Path.ToLower().Replace(".cr2", "." +
-                                                    Guid.NewGuid().ToString() + ".cr2"));
+                                                fi.MoveTo(destImagePath.ToLower().Replace(".cr2", "." + Guid.NewGuid().ToString() + ".cr2"));
                                             }
                                         }
+
+                                        imagesProcessed++;
+                                        FileInfo subfolderFileInfoDequeued;
+                                        subFolderFileQueue.TryDequeue(out subfolderFileInfoDequeued);
                                     }
                                 }
 
-                                string tempDurationPerImage = durationPerImage.ToString();
+                                swFile.Stop();
+                                output += "\r\n" + swFile.Elapsed.ToString() + " file activity duration.";
 
-                                //Anything else left in the queue?
-                                if (fileQueue.Count() > 0)
+                                //Write appropriate flavor of output log
+                                if (errorFlag)
                                 {
-                                    FileInfo fiPeekNext;
-                                    while (!fileQueue.TryPeek(out fiPeekNext) && fileQueue.Count() != 0)
-                                    {
+                                    File.WriteAllText(filePath + ".ProcessErrored.log", output);
+                                }
+                                else
+                                {
+                                    File.WriteAllText(filePath + ".log", output);
+                                }
 
+                                //Move Log and perform cleanup if Processing was Successful
+                                if (!errorFlag)
+                                {
+                                    if (File.Exists(initialLogPath))
+                                    {
+                                        if (!File.Exists(destLogPath))
+                                        {
+                                            File.Move(initialLogPath, destLogPath);
+                                        }
+                                        else
+                                        {
+                                            File.Move(initialLogPath, destLogPath.Replace(".log", "." + Guid.NewGuid().ToString() + ".log"));
+                                        }
                                     }
 
-                                    //Switching to a new folder? Clean up logs after making sure there are no images left in folder.
-                                    if (
-                                        (fiPeekNext.DirectoryName != directoryPath && Directory.EnumerateFiles(
-                                            directoryPath, "*.dng", SearchOption.TopDirectoryOnly).Union(Directory.EnumerateFiles(
-                                            directoryPath, "*.cr2", SearchOption.TopDirectoryOnly)).Count() == 0) || fiPeekNext == null)
+                                    if (isCR2Processing)
                                     {
-                                        directoryStopwatch.Stop();
-
-                                        subFolderFileQueue = new ConcurrentQueue<FileInfo>(
-                                            fiPeekNext.Directory.EnumerateFiles("*.dng", SearchOption.TopDirectoryOnly).Union(
-                                                fiPeekNext.Directory.EnumerateFiles("*.cr2", SearchOption.TopDirectoryOnly)).ToList()
-                                            );
-
-                                        maxSubfolderFileQueue = subFolderFileQueue.Count();
-
-                                        string directoryDuration = directoryStopwatch.Elapsed.ToString() + " Directory Duration.";
-                                        directoryDuration += "\r\n" + tempDurationPerImage + " Duration Per Image.";
-                                        if (!File.Exists(directoryPath + "\\directoryDuration.log"))
+                                        //Move resultant DNG if CR2 was processed
+                                        if (File.Exists(initialDNGPath))
                                         {
-                                            File.WriteAllText(directoryPath + "\\directoryDuration.log", directoryDuration);
-                                        }
-
-                                        directoryStopwatch.Reset();
-
-                                        IEnumerable<FileInfo> logs = new DirectoryInfo(directoryPath).EnumerateFiles("*.log", SearchOption.TopDirectoryOnly);
-                                        if (logs.Count() > 0)
-                                        {
-                                            foreach (FileInfo log in logs)
+                                            if (!File.Exists(destDNGPath))
                                             {
-                                                if (Directory.Exists(log.DirectoryName + "\\logs"))
+                                                File.Move(initialDNGPath, destDNGPath);
+                                            }
+                                            else
+                                            {
+                                                File.Move(initialDNGPath, (destDNGPath.ToLower().Replace(".dng", "." + Guid.NewGuid().ToString() + ".dng")));
+                                            }
+                                        }
+                                        else
+                                        //Resultant DNG leftover while CR2 still in folder
+                                        {
+                                            DirectoryInfo dirInfo = new DirectoryInfo(currentDirectory);
+                                            dirInfo.CreateSubdirectory("Dual ISO Original CR2");
+
+                                            string leftoverInitialCR2Path = initialImagePath.ToLower().Replace(".dng", ".cr2").ToUpper();
+                                            string leftoverDestCR2Path = destImagePath.Replace(
+                                                "Dual ISO CR2", "Dual ISO Original CR2").ToLower().Replace(".dng", ".cr2").ToUpper();
+
+                                            if (File.Exists(leftoverInitialCR2Path))
+                                            {
+                                                if (!File.Exists(leftoverDestCR2Path))
                                                 {
-                                                    log.MoveTo(log.DirectoryName + "\\logs\\" + log.Name);
+                                                    File.Move(leftoverInitialCR2Path, leftoverDestCR2Path);
+                                                }
+                                                else
+                                                {
+                                                    File.Move(leftoverInitialCR2Path, leftoverDestCR2Path.ToLower().Replace(".cr2", "." +
+                                                        Guid.NewGuid().ToString() + ".cr2"));
                                                 }
                                             }
                                         }
                                     }
-                                }
-                                else
-                                {
-                                    //No more files in queue. Clean up logs for the final time after making sure there are no image files remaining
-                                    if (Directory.EnumerateFiles(directoryPath, "*.dng", SearchOption.TopDirectoryOnly).Union(
-                                        Directory.EnumerateFiles(directoryPath, "*.cr2", SearchOption.TopDirectoryOnly)).Count() == 0)
-                                    {
-                                        directoryStopwatch.Stop();
 
-                                        string directoryDuration = directoryStopwatch.Elapsed.ToString() + " Directory Duration.";
-                                        directoryDuration += "\r\n" + tempDurationPerImage + " Duration Per Image.";
-                                        if (!File.Exists(directoryPath + "\\directoryDuration.log"))
+                                    string tempDurationPerImage = durationPerImage.ToString();
+
+                                    //Anything else left in the queue?
+                                    if (fileQueue.Count() > 0)
+                                    {
+                                        FileInfo fiPeekNext;
+                                        while (!fileQueue.TryPeek(out fiPeekNext) && fileQueue.Count() != 0)
                                         {
-                                            File.WriteAllText(directoryPath + "\\directoryDuration.log", directoryDuration);
+
                                         }
 
-                                        directoryStopwatch.Reset();
-
-                                        IEnumerable<FileInfo> logs = new DirectoryInfo(directoryPath).EnumerateFiles("*.log", SearchOption.TopDirectoryOnly);
-                                        if (logs.Count() > 0)
+                                        //Switching to a new folder? Clean up logs after making sure there are no images left in folder.
+                                        if (
+                                            (fiPeekNext.DirectoryName != directoryPath && Directory.EnumerateFiles(
+                                                directoryPath, "*.dng", SearchOption.TopDirectoryOnly).Union(Directory.EnumerateFiles(
+                                                directoryPath, "*.cr2", SearchOption.TopDirectoryOnly)).Count() == 0) || fiPeekNext == null)
                                         {
-                                            foreach (FileInfo log in logs)
+                                            directoryStopwatch.Stop();
+
+                                            subFolderFileQueue = new ConcurrentQueue<FileInfo>(
+                                                fiPeekNext.Directory.EnumerateFiles("*.dng", SearchOption.TopDirectoryOnly).Union(
+                                                    fiPeekNext.Directory.EnumerateFiles("*.cr2", SearchOption.TopDirectoryOnly)).ToList()
+                                                );
+
+                                            maxSubfolderFileQueueCount = subFolderFileQueue.Count();
+
+                                            string directoryDuration = directoryStopwatch.Elapsed.ToString() + " Directory Duration.";
+                                            directoryDuration += "\r\n" + tempDurationPerImage + " Duration Per Image.";
+                                            if (!File.Exists(directoryPath + "\\directoryDuration.log"))
                                             {
-                                                if (Directory.Exists(log.DirectoryName + "\\logs"))
+                                                File.WriteAllText(directoryPath + "\\directoryDuration.log", directoryDuration);
+                                            }
+
+                                            directoryStopwatch.Reset();
+
+                                            IEnumerable<FileInfo> logs = new DirectoryInfo(directoryPath).EnumerateFiles("*.log", SearchOption.TopDirectoryOnly);
+                                            if (logs.Count() > 0)
+                                            {
+                                                foreach (FileInfo log in logs)
                                                 {
-                                                    if (File.Exists(log.FullName))
+                                                    if (Directory.Exists(log.DirectoryName + "\\logs"))
                                                     {
                                                         log.MoveTo(log.DirectoryName + "\\logs\\" + log.Name);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        //No more files in queue. Clean up logs for the final time after making sure there are no image files remaining
+                                        if (Directory.EnumerateFiles(directoryPath, "*.dng", SearchOption.TopDirectoryOnly).Union(
+                                            Directory.EnumerateFiles(directoryPath, "*.cr2", SearchOption.TopDirectoryOnly)).Count() == 0)
+                                        {
+                                            directoryStopwatch.Stop();
+
+                                            string directoryDuration = directoryStopwatch.Elapsed.ToString() + " Directory Duration.";
+                                            directoryDuration += "\r\n" + tempDurationPerImage + " Duration Per Image.";
+                                            if (!File.Exists(directoryPath + "\\directoryDuration.log"))
+                                            {
+                                                File.WriteAllText(directoryPath + "\\directoryDuration.log", directoryDuration);
+                                            }
+
+                                            directoryStopwatch.Reset();
+
+                                            IEnumerable<FileInfo> logs = new DirectoryInfo(directoryPath).EnumerateFiles("*.log", SearchOption.TopDirectoryOnly);
+                                            if (logs.Count() > 0)
+                                            {
+                                                foreach (FileInfo log in logs)
+                                                {
+                                                    if (Directory.Exists(log.DirectoryName + "\\logs"))
+                                                    {
+                                                        if (File.Exists(log.FullName))
+                                                        {
+                                                            log.MoveTo(log.DirectoryName + "\\logs\\" + log.Name);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1238,14 +1288,21 @@ namespace Dual_ISO_Processor
                                 }
                             }
                         }
+
+                        if (isCR2Processing)
+                        {
+                            //If processing CR2, sleep thread for between 5 and 10 seconds
+                            Random r = new Random();
+                            Thread.Sleep(r.Next(5000, 10000));
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    if (fiPeek != null)
+                    catch (Exception ex)
                     {
-                        File.WriteAllText(fiPeek.DirectoryName + "\\ExceptionLog." + fiPeek.Name + "." +
-                            Guid.NewGuid().ToString() + ".log", ex.Message + "\r\n" + ex.StackTrace);
+                        if (fiPeek != null)
+                        {
+                            File.WriteAllText(fiPeek.DirectoryName + "\\ExceptionLog." + fiPeek.Name + "." +
+                                Guid.NewGuid().ToString() + ".log", ex.Message + "\r\n" + ex.StackTrace);
+                        }
                     }
                 }
             } while (fileQueue.Count() > 0 && !((BackgroundWorker)(sender)).CancellationPending && !formClosed);
@@ -1307,9 +1364,10 @@ namespace Dual_ISO_Processor
         {
             do
             {
-                if (maxFileQueue > 0)
+                //Once the file queue has been loaded, start calculating completion percent
+                if (maxFileQueueCount > 0)
                 {
-                    double newPercentComplete = ((double)imagesProcessed / (double)maxFileQueue);
+                    double newPercentComplete = ((double)imagesProcessed / (double)maxFileQueueCount);
                     if (newPercentComplete != percentComplete)
                     {
                         percentComplete = newPercentComplete;
@@ -1366,13 +1424,19 @@ namespace Dual_ISO_Processor
         {
             if (!File.Exists(txtCr2hdrPath.Text))
             {
-                FindAndMoveMsgBox("Path Error", this.Location.X + this.Height / 2, this.Location.Y + this.Width / 8);
-                MessageBox.Show(this, "Invalid cr2hdr path.", "Path Error");
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    FindAndMoveMsgBox("Path Error", this);
+                    MessageBox.Show(this, "Invalid cr2hdr path.", "Path Error");
+                });
             }
             else if (!Directory.Exists(txtImageFolderPath.Text))
             {
-                FindAndMoveMsgBox("Path Error", this.Location.X + this.Height / 2, this.Location.Y + this.Width / 8);
-                MessageBox.Show(this, "Invalid image folder path.", "Path Error");
+                BeginInvoke((MethodInvoker)delegate
+                {
+                    FindAndMoveMsgBox("Path Error", this);
+                    MessageBox.Show(this, "Invalid image folder path.", "Path Error");
+                });
             }
             else
             {
@@ -1434,8 +1498,11 @@ namespace Dual_ISO_Processor
 
                 if (!pathHit)
                 {
-                    FindAndMoveMsgBox("dcraw", this.Location.X + this.Height / 2, this.Location.Y + this.Width / 8);
-                    MessageBox.Show(this, "dcraw.exe not found. \r\n\r\nPlease install and copy to the cr2hdr path or the Windows directory.", "dcraw");
+                    BeginInvoke((MethodInvoker)delegate
+                    {
+                        FindAndMoveMsgBox("dcraw", this);
+                        MessageBox.Show(this, "dcraw.exe not found. \r\n\r\nPlease install and copy to the cr2hdr path or the Windows directory.", "dcraw");
+                    });
                 }
                 else
                 {
@@ -1443,12 +1510,15 @@ namespace Dual_ISO_Processor
 
                     if (!exifHit)
                     {
-                        FindAndMoveMsgBox("ExifTool Missing. Continue?", this.Location.X + this.Height / 2, this.Location.Y + this.Width / 8);
-                        if (MessageBox.Show(this, "exiftool.exe not found. \r\nThis is optional. \r\n\r\nIf wanted, please install and copy to the cr2hdr path or " +
-                            "the Windows directory. \r\nContinue?", "ExifTool Missing. Continue?", MessageBoxButtons.YesNo) == DialogResult.No)
+                        BeginInvoke((MethodInvoker)delegate
                         {
-                            beginProcessing = false;
-                        }
+                            FindAndMoveMsgBox("ExifTool Missing. Continue?", this);
+                            if (MessageBox.Show(this, "exiftool.exe not found. \r\nThis is optional. \r\n\r\nIf wanted, please install and copy to the cr2hdr path or " +
+                                    "the Windows directory. \r\nContinue?", "ExifTool Missing. Continue?", MessageBoxButtons.YesNo) == DialogResult.No)
+                            {
+                                beginProcessing = false;
+                            }
+                        });
                     }
 
                     if (beginProcessing)
@@ -1458,10 +1528,12 @@ namespace Dual_ISO_Processor
                         if (!bwPreparing.IsBusy && !bwProgressBar.IsBusy)
                         {
                             //Reset all counters
+                            errorCount = 0;
                             imagesProcessed = 0;
                             elapsedTime = string.Empty;
                             durationPerImage = string.Empty;
                             timeRemaining = string.Empty;
+                            folderTimeRemaining = string.Empty;
 
                             //Reset Stopwatch
                             cwStopwatch.Stop();
@@ -1613,6 +1685,10 @@ namespace Dual_ISO_Processor
                     if ((workerPosition + 1) <= allowedThreads)
                     {
                         bw.RunWorkerAsync();
+
+                        //Stagger start of threads for between 5 and 10 seconds
+                        Random r = new Random();
+                        Thread.Sleep(r.Next(5000, 10000));
                     }
                 }
 
